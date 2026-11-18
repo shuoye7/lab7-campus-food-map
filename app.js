@@ -41,6 +41,7 @@
     amap: null,
     amapMarkers: [],
     amapInfo: null,
+    markerBatchToken: 0,
     local: {
       zoom: 1,
       offsetX: 0,
@@ -522,7 +523,7 @@
       lng: lng,
       lat: lat,
       address: raw.address || '',
-      distance: haversine(state.center, { lng: lng, lat: lat }),
+      distance: Math.max(10, Math.round(haversine(state.center, { lng: lng, lat: lat }))),
       source: 'mock',
       reason: ''
     };
@@ -530,14 +531,23 @@
     return item;
   }
 
+  function resolveDistance(poi, lng, lat) {
+    var distance = parseFloat(poi && poi.distance);
+    if (!isFinite(distance) || distance <= 0) {
+      distance = parseFloat(poi && poi._distance);
+    }
+    if (!isFinite(distance) || distance <= 0) {
+      distance = haversine(state.center, { lng: lng, lat: lat });
+    }
+    if (!isFinite(distance) || distance <= 0) distance = 10;
+    return Math.max(10, Math.round(distance));
+  }
+
   function normalizePoi(poi, index) {
     var pair = String(poi.location || '').split(',');
     var lng = parseFloat(pair[0]);
     var lat = parseFloat(pair[1]);
-    var distance = parseFloat(poi.distance);
-    if (!isFinite(distance) || distance <= 0) {
-      distance = haversine(state.center, { lng: lng, lat: lat });
-    }
+    var distance = resolveDistance(poi, lng, lat);
     var taste = detectTaste(poi);
     var cost = parseFloat(poi.biz_ext && poi.biz_ext.cost);
     var rating = parseFloat(poi.biz_ext && poi.biz_ext.rating);
@@ -917,8 +927,7 @@
   }
 
   function applyEstimatedRoute(item, note) {
-    var straight = haversine(state.center, { lng: item.lng, lat: item.lat });
-    var distance = Math.max(10, Math.round((straight * 1.25) / 10) * 10);
+    var distance = Math.max(10, Math.round(item.distance));
     var minutes = Math.max(1, Math.round(distance / 75));
     state.route = {
       id: item.id,
@@ -930,7 +939,7 @@
       desc: '从当前位置出发，沿校园道路步行前往' + item.name + '，全程约 ' +
         formatDistance(distance) + '，步行约 ' + minutes + ' 分钟。',
       sourceText: '估算路线',
-      note: note || '示例数据模式：路线按直线距离估算，仅供参考。'
+      note: note || '示例数据模式：路线按距离估算，仅供参考。'
     };
     refreshInfo();
     updateLocalMarkerState();
@@ -988,9 +997,12 @@
       await loadAmapScript();
       map = new window.AMap.Map('amapMap', {
         zoom: 15,
+        zooms: [12, 18],
         center: [state.center.lng, state.center.lat],
         viewMode: '2D',
-        resizeEnable: true
+        resizeEnable: true,
+        enableHighResolution: false,
+        fadeEffect: false
       });
       var ready = await waitMapReady(map);
       if (!ready) throw new Error('地图初始化超时');
@@ -1077,25 +1089,49 @@
 
   function renderAMapMarkers() {
     if (!state.amap || !window.AMap) return;
+    state.markerBatchToken += 1;
+    var token = state.markerBatchToken;
+    clearAmapMarkers();
+    var list = sortedList();
+    var index = 0;
+    var batchSize = 6;
+
+    function addBatch() {
+      if (state.markerBatchToken !== token || !state.amap) return;
+      var end = Math.min(index + batchSize, list.length);
+      list.slice(index, end).forEach(function (item) {
+        var marker = new window.AMap.Marker({
+          position: [item.lng, item.lat],
+          title: item.name,
+          anchor: 'bottom-center',
+          zIndex: 100 + index,
+          content: pinHtml(index + 1, item.id === state.selectedId)
+        });
+        marker.on('click', function () {
+          selectRestaurant(item.id, 'map');
+        });
+        state.amap.add(marker);
+        state.amapMarkers.push({ marker: marker, id: item.id });
+        index += 1;
+      });
+      if (index < list.length) {
+        if (window.requestAnimationFrame) window.requestAnimationFrame(addBatch);
+        else setTimeout(addBatch, 16);
+      }
+    }
+
+    addBatch();
+  }
+
+  function clearAmapMarkers() {
+    if (!state.amap) {
+      state.amapMarkers = [];
+      return;
+    }
     state.amapMarkers.forEach(function (entry) {
       try { state.amap.remove(entry.marker); } catch (err) { /* ignore */ }
     });
     state.amapMarkers = [];
-    var list = sortedList();
-    list.forEach(function (item, index) {
-      var marker = new window.AMap.Marker({
-        position: [item.lng, item.lat],
-        title: item.name,
-        anchor: 'bottom-center',
-        zIndex: 100 + index,
-        content: pinHtml(index + 1, item.id === state.selectedId)
-      });
-      marker.on('click', function () {
-        selectRestaurant(item.id, 'map');
-      });
-      state.amap.add(marker);
-      state.amapMarkers.push({ marker: marker, id: item.id });
-    });
   }
 
   function pinHtml(index, active) {

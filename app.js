@@ -22,7 +22,20 @@
     isMockData: true,
     sort: 'distance',
     keyword: '',
+    price: 'all',
+    taste: 'all',
     selectedId: null,
+    route: {
+      id: null,
+      status: 'idle',
+      expanded: false,
+      distance: 0,
+      minutes: 0,
+      steps: [],
+      desc: '',
+      sourceText: '',
+      note: ''
+    },
     useMockData: true,
     mapMode: 'local',
     amap: null,
@@ -63,6 +76,7 @@
     renderLocalMarkers();
     renderMeta();
     setMapBadge('本地示意地图', true);
+    syncFilterButtons();
     bindEvents();
     locateAndSearch();
     tryAmap();
@@ -75,7 +89,7 @@
     dom.searchForm = document.getElementById('searchForm');
     dom.searchInput = document.getElementById('searchInput');
     dom.searchBtn = document.getElementById('searchBtn');
-    dom.chips = document.getElementById('chips');
+    dom.filterBar = document.getElementById('filterBar');
     dom.resultMeta = document.getElementById('resultMeta');
     dom.sortDistance = document.getElementById('sortDistance');
     dom.sortRating = document.getElementById('sortRating');
@@ -100,17 +114,31 @@
     dom.searchForm.addEventListener('submit', function (event) {
       event.preventDefault();
       state.keyword = dom.searchInput.value.trim();
-      setActiveChip();
       searchPlaces();
     });
 
-    dom.chips.addEventListener('click', function (event) {
-      var chip = event.target.closest('.chip');
-      if (!chip) return;
-      state.keyword = chip.getAttribute('data-keyword') || '';
-      dom.searchInput.value = state.keyword;
-      setActiveChip();
-      searchPlaces();
+    dom.filterBar.addEventListener('click', function (event) {
+      var priceBtn = event.target.closest('[data-price]');
+      if (priceBtn) {
+        state.price = priceBtn.getAttribute('data-price');
+        syncFilterButtons();
+        applyFilters();
+        return;
+      }
+      var tasteBtn = event.target.closest('[data-taste]');
+      if (tasteBtn) {
+        state.taste = tasteBtn.getAttribute('data-taste');
+        syncFilterButtons();
+        applyFilters();
+      }
+    });
+
+    document.addEventListener('click', function (event) {
+      var routeBtn = event.target.closest('.route-btn');
+      if (routeBtn) {
+        event.preventDefault();
+        handleRouteClick(routeBtn.getAttribute('data-id'));
+      }
     });
 
     dom.sortDistance.addEventListener('click', function () { setSort('distance'); });
@@ -132,6 +160,7 @@
     dom.localInfo.addEventListener('click', function (event) {
       if (event.target.closest('.info-close')) {
         state.selectedId = null;
+        resetRoute();
         hideLocalInfo();
         markCards();
         updateLocalMarkerState();
@@ -165,13 +194,46 @@
     });
   }
 
-  function setActiveChip() {
-    if (!dom.chips) return;
-    var chips = dom.chips.querySelectorAll('.chip');
-    for (var i = 0; i < chips.length; i++) {
-      var value = chips[i].getAttribute('data-keyword') || '';
-      chips[i].classList.toggle('is-active', value === state.keyword);
+  function syncFilterButtons() {
+    if (!dom.filterBar) return;
+    var priceButtons = dom.filterBar.querySelectorAll('[data-price]');
+    for (var i = 0; i < priceButtons.length; i++) {
+      priceButtons[i].classList.toggle('is-active', priceButtons[i].getAttribute('data-price') === state.price);
     }
+    var tasteButtons = dom.filterBar.querySelectorAll('[data-taste]');
+    for (var j = 0; j < tasteButtons.length; j++) {
+      tasteButtons[j].classList.toggle('is-active', tasteButtons[j].getAttribute('data-taste') === state.taste);
+    }
+  }
+
+  function matchPrice(item) {
+    if (state.price === 'low') return item.price != null && item.price < 30;
+    if (state.price === 'mid') return item.price != null && item.price >= 30 && item.price <= 80;
+    if (state.price === 'high') return item.price != null && item.price > 80;
+    return true;
+  }
+
+  function matchTaste(item) {
+    return state.taste === 'all' || item.taste === state.taste;
+  }
+
+  function applyFilters() {
+    var list = sortedList();
+    var visible = false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === state.selectedId) visible = true;
+    }
+    if (!visible && state.selectedId) {
+      state.selectedId = null;
+      resetRoute();
+      hideLocalInfo();
+      if (state.amapInfo) state.amapInfo.close();
+      updateLocalMarkerState();
+    }
+    renderList();
+    renderMeta();
+    renderLocalMarkers();
+    if (state.mapMode === 'amap') renderAMapMarkers();
   }
 
   function setSort(sort) {
@@ -223,14 +285,20 @@
   }
 
   function renderMeta() {
-    var list = state.restaurants;
+    var list = sortedList();
+    var total = state.restaurants.length;
     var near = list.filter(function (item) { return item.distance < 1000; }).length;
-    dom.resultMeta.textContent = '共 ' + list.length + ' 家 · ' +
+    var countText = list.length === total
+      ? total + ' 家'
+      : list.length + ' 家（共 ' + total + ' 家）';
+    dom.resultMeta.textContent = countText + ' · ' +
       (state.isMockData ? '示例数据' : '高德实时数据') + ' · 1 公里内 ' + near + ' 家';
   }
 
   function sortedList() {
-    var list = state.restaurants.slice();
+    var list = state.restaurants.filter(function (item) {
+      return matchPrice(item) && matchTaste(item);
+    });
     if (state.sort === 'rating') {
       list.sort(function (a, b) {
         return (b.rating == null ? -1 : b.rating) - (a.rating == null ? -1 : a.rating) ||
@@ -286,6 +354,7 @@
   function selectRestaurant(id, source) {
     var item = findById(id);
     if (!item) return;
+    if (state.selectedId !== id) resetRoute();
     state.selectedId = id;
     markCards();
     if (state.mapMode === 'amap' && state.amap) {
@@ -400,6 +469,7 @@
       state.restaurants = items;
       state.isMockData = false;
       state.selectedId = null;
+      resetRoute();
       hideLocalInfo();
       state.amapInfo && state.amapInfo.close();
       renderList();
@@ -418,6 +488,7 @@
     state.restaurants = buildMockRestaurants(keyword);
     state.isMockData = true;
     state.selectedId = null;
+    resetRoute();
     hideLocalInfo();
     if (state.amapInfo) state.amapInfo.close();
     renderList();
@@ -453,9 +524,9 @@
       address: raw.address || '',
       distance: haversine(state.center, { lng: lng, lat: lat }),
       source: 'mock',
-      reason: raw.reason || ''
+      reason: ''
     };
-    if (!item.reason) item.reason = buildReason(item);
+    item.reason = buildReason(item);
     return item;
   }
 
@@ -504,22 +575,27 @@
   }
 
   function buildReason(item) {
-    var bits = [];
-    if (item.distance < 1000) {
-      bits.push('步行约 ' + Math.max(1, Math.round(item.distance / 80)) + ' 分钟可达');
+    var parts = [];
+    var minutes = Math.max(1, Math.round(item.distance / 75));
+    if (item.distance < 600) {
+      parts.push('步行约 ' + minutes + ' 分钟即到');
+    } else if (item.distance < 1500) {
+      parts.push('步行约 ' + minutes + ' 分钟');
+    } else {
+      parts.push('距离 ' + formatDistance(item.distance) + '，建议骑行');
     }
-    if (item.price != null && item.price < 30) {
-      bits.push('人均 ' + item.price + ' 元，平价之选');
-    } else if (item.price != null && item.price > 80) {
-      bits.push('人均 ' + item.price + ' 元，适合聚餐');
+    if (item.price != null) {
+      if (item.price < 30) parts.push('平价人均 ' + item.price + ' 元');
+      else if (item.price <= 80) parts.push('人均 ' + item.price + ' 元');
+      else parts.push('人均 ' + item.price + ' 元偏高');
     }
-    if (item.rating != null && item.rating >= 4.5) {
-      bits.push('评分 ' + item.rating.toFixed(1) + '，口碑不错');
+    if (item.rating != null) {
+      if (item.rating >= 4.5) parts.push('评分 ' + item.rating.toFixed(1) + ' 口碑好');
+      else if (item.rating >= 4.0) parts.push('评分 ' + item.rating.toFixed(1));
+      else parts.push('评分 ' + item.rating.toFixed(1) + ' 胜在实惠');
     }
-    if (!bits.length) {
-      bits.push('人均 ' + (item.price == null ? '—' : item.price) + ' 元，口味' + item.taste);
-    }
-    return bits.slice(0, 2).join('；');
+    if (item.taste) parts.push('主打' + item.taste);
+    return parts.join(' · ');
   }
 
   function hasLocation(poi) {
@@ -709,6 +785,7 @@
     try { dom.localMap.releasePointerCapture(event.pointerId); } catch (err) { /* ignore */ }
     if (!state.local.moved) {
       state.selectedId = null;
+      resetRoute();
       hideLocalInfo();
       markCards();
       updateLocalMarkerState();
@@ -740,15 +817,161 @@
     if (item.price != null) chips.push('💰 人均 ' + item.price + ' 元');
     if (item.rating != null) chips.push('★ ' + item.rating.toFixed(1));
     chips.push('🍽 ' + esc(item.taste));
+    var hasRoute = state.route.id === item.id && state.route.status !== 'idle';
+    var routeLabel = hasRoute && state.route.expanded ? '收起路线' : (hasRoute ? '展开路线' : '去这里');
     return '<div class="info-meta">' + chips.map(function (text) {
       return '<span>' + text + '</span>';
     }).join('') + '</div>' +
       (item.address ? '<p class="info-addr">' + esc(item.address) + '</p>' : '') +
-      (item.reason ? '<p class="info-reason"><b>推荐</b>' + esc(item.reason) + '</p>' : '');
+      (item.reason ? '<p class="info-reason"><b>推荐</b>' + esc(item.reason) + '</p>' : '') +
+      '<div class="info-actions"><button class="route-btn" type="button" data-id="' +
+      esc(item.id) + '">' + routeLabel + '</button></div>' +
+      routePanelHtml(item);
   }
 
   function infoHtml(item) {
     return '<div class="info-card"><h3>' + esc(item.name) + '</h3>' + infoBody(item) + '</div>';
+  }
+
+  function resetRoute() {
+    state.route = {
+      id: null,
+      status: 'idle',
+      expanded: false,
+      distance: 0,
+      minutes: 0,
+      steps: [],
+      desc: '',
+      sourceText: '',
+      note: ''
+    };
+  }
+
+  function handleRouteClick(id) {
+    var item = findById(id);
+    if (!item) return;
+    if (state.selectedId !== id) {
+      state.selectedId = id;
+      markCards();
+      resetRoute();
+    }
+    if (state.route.id === id && state.route.status !== 'idle') {
+      state.route.expanded = !state.route.expanded;
+      refreshInfo();
+      updateLocalMarkerState();
+      return;
+    }
+    state.route = {
+      id: id,
+      status: 'loading',
+      expanded: true,
+      distance: 0,
+      minutes: 0,
+      steps: [],
+      desc: '',
+      sourceText: '',
+      note: ''
+    };
+    refreshInfo();
+    loadRoute(item);
+  }
+
+  async function loadRoute(item) {
+    if (!KEY || state.useMockData || state.isMockData) {
+      applyEstimatedRoute(item, '');
+      return;
+    }
+    try {
+      var url = REST + '/direction/walking?key=' + encodeURIComponent(KEY) +
+        '&origin=' + state.center.lng + ',' + state.center.lat +
+        '&destination=' + item.lng + ',' + item.lat + '&extensions=base';
+      var result = await fetchJSON(url, 9000);
+      var path = result && result.route && result.route.paths && result.route.paths[0];
+      if (!path || !(Number(path.distance) > 0)) throw new Error('无步行路线');
+      if (state.route.id !== item.id) return;
+      var steps = (path.steps || []).map(function (step) {
+        return stripHtml(step.instruction || '');
+      }).filter(function (text) { return text; });
+      var distance = Math.round(Number(path.distance));
+      var seconds = Number(path.duration);
+      var minutes = isFinite(seconds) && seconds > 0
+        ? Math.max(1, Math.round(seconds / 60))
+        : Math.max(1, Math.round(distance / 75));
+      state.route = {
+        id: item.id,
+        status: 'ready',
+        expanded: true,
+        distance: distance,
+        minutes: minutes,
+        steps: steps.slice(0, 4),
+        desc: steps.length ? '' : '沿校园周边道路步行前往，全程约 ' + formatDistance(distance) + '。',
+        sourceText: '高德步行路线',
+        note: ''
+      };
+      refreshInfo();
+      updateLocalMarkerState();
+    } catch (err) {
+      if (state.route.id !== item.id) return;
+      applyEstimatedRoute(item, '路线接口不可用（' + reasonText(err) + '），已按直线距离估算');
+    }
+  }
+
+  function applyEstimatedRoute(item, note) {
+    var straight = haversine(state.center, { lng: item.lng, lat: item.lat });
+    var distance = Math.max(10, Math.round((straight * 1.25) / 10) * 10);
+    var minutes = Math.max(1, Math.round(distance / 75));
+    state.route = {
+      id: item.id,
+      status: 'ready',
+      expanded: true,
+      distance: distance,
+      minutes: minutes,
+      steps: [],
+      desc: '从当前位置出发，沿校园道路步行前往' + item.name + '，全程约 ' +
+        formatDistance(distance) + '，步行约 ' + minutes + ' 分钟。',
+      sourceText: '估算路线',
+      note: note || '示例数据模式：路线按直线距离估算，仅供参考。'
+    };
+    refreshInfo();
+    updateLocalMarkerState();
+  }
+
+  function routePanelHtml(item) {
+    var route = state.route;
+    if (route.id !== item.id || route.status === 'idle') return '';
+    if (route.status === 'loading') {
+      return '<div class="route-panel"><p class="route-loading">正在获取步行路线…</p></div>';
+    }
+    var summary = '<div class="route-summary"><strong>约 ' + formatDistance(route.distance) + '</strong>' +
+      '<span>步行约 ' + route.minutes + ' 分钟</span>' +
+      '<em>' + esc(route.sourceText) + '</em></div>';
+    if (!route.expanded) {
+      return '<div class="route-panel is-collapsed">' + summary + '</div>';
+    }
+    var steps = route.steps && route.steps.length
+      ? '<ol class="route-steps">' + route.steps.map(function (text) {
+        return '<li>' + esc(text) + '</li>';
+      }).join('') + '</ol>'
+      : '<p class="route-desc">' + esc(route.desc) + '</p>';
+    return '<div class="route-panel">' + summary + steps +
+      (route.note ? '<p class="route-note">' + esc(route.note) + '</p>' : '') + '</div>';
+  }
+
+  function refreshInfo() {
+    var item = findById(state.selectedId);
+    if (!item) return;
+    if (state.mapMode === 'amap' && state.amapInfo) {
+      state.amapInfo.setContent(infoHtml(item));
+      if (state.amapInfo.getIsOpen && !state.amapInfo.getIsOpen()) {
+        state.amapInfo.open(state.amap, [item.lng, item.lat]);
+      }
+    } else {
+      showLocalInfo(item);
+    }
+  }
+
+  function stripHtml(text) {
+    return String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
   async function tryAmap() {
@@ -783,6 +1006,7 @@
       });
       state.amapInfo.on('close', function () {
         state.selectedId = null;
+        resetRoute();
         markCards();
         updateAmapMarkersActive();
       });

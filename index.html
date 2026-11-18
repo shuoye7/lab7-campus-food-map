@@ -33,14 +33,24 @@
       <button type="submit" id="searchBtn">搜索</button>
     </form>
 
-    <div class="chips" id="chips" role="group" aria-label="快捷口味筛选">
-      <button class="chip is-active" type="button" data-keyword="">附近美食</button>
-      <button class="chip" type="button" data-keyword="川菜">川菜</button>
-      <button class="chip" type="button" data-keyword="粤菜">粤菜</button>
-      <button class="chip" type="button" data-keyword="日料">日料</button>
-      <button class="chip" type="button" data-keyword="西餐">西餐</button>
-      <button class="chip" type="button" data-keyword="小吃">小吃</button>
-      <button class="chip" type="button" data-keyword="奶茶">奶茶</button>
+    <div class="filter-bar" id="filterBar" aria-label="价格与口味筛选">
+      <div class="filter-group" role="group" aria-label="价格筛选">
+        <span class="filter-label">价格</span>
+        <button class="chip is-active" type="button" data-price="all">全部</button>
+        <button class="chip" type="button" data-price="low">平价 &lt;30</button>
+        <button class="chip" type="button" data-price="mid">中档 30-80</button>
+        <button class="chip" type="button" data-price="high">高档 &gt;80</button>
+      </div>
+      <div class="filter-group" role="group" aria-label="口味筛选">
+        <span class="filter-label">口味</span>
+        <button class="chip is-active" type="button" data-taste="all">全部</button>
+        <button class="chip" type="button" data-taste="川菜">川菜</button>
+        <button class="chip" type="button" data-taste="粤菜">粤菜</button>
+        <button class="chip" type="button" data-taste="日料">日料</button>
+        <button class="chip" type="button" data-taste="西餐">西餐</button>
+        <button class="chip" type="button" data-taste="小吃">小吃</button>
+        <button class="chip" type="button" data-taste="奶茶">奶茶</button>
+      </div>
     </div>
   </header>
 
@@ -61,7 +71,7 @@
       <ul class="card-list" id="cardList" aria-live="polite"></ul>
       <div class="empty" id="emptyState" hidden>
         <p>没有找到匹配的美食</p>
-        <span>换个关键词试试，例如“川菜”“奶茶”</span>
+        <span>换个关键词，或调整价格、口味筛选条件试试</span>
       </div>
       <div class="skeleton" id="skeleton" hidden>
         <div class="sk-row"></div>
